@@ -22,8 +22,8 @@ let rejectedPhotos = [];
 let trashedPhotos = [];
 let autoApprove = false;
 let slideDuration = 7000;
-let eventCode = "1234"; // Code par défaut
-let isEventActive = true; // État de l'événement
+let eventCode = "1234"; 
+let isEventActive = true; 
 let activeClients = {};
 
 // Lecture de la base de données
@@ -78,7 +78,6 @@ const checkAuth = (req, res, next) => {
     else res.redirect('/login');
 };
 
-// Protection pour les invités via code
 const checkEventAccess = (req, res, next) => {
     if (!isEventActive) return res.send(`<body style="background:#121212;color:white;text-align:center;padding:50px;font-family:sans-serif;"><h1>🔒 Prestation terminée</h1><p>L'accès est fermé.</p></body>`);
     if (req.session.hasAccess) return next();
@@ -122,6 +121,7 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => { delete activeClients[socket.id]; refreshAll(); });
 });
 
+// --- ROUTES AUTH ---
 app.get('/login', (req, res) => {
     res.send(`
         <body style="font-family:sans-serif; background:#121212; color:white; display:flex; align-items:center; justify-content:center; height:100vh; margin:0;">
@@ -146,6 +146,7 @@ app.post('/login', (req, res) => {
 
 app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/login'); });
 
+// --- ROUTE CLIENT (HOME) ---
 app.get('/', checkEventAccess, (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -196,6 +197,7 @@ app.get('/', checkEventAccess, (req, res) => {
     `);
 });
 
+// --- ROUTE ADMIN ---
 app.get('/admin', checkAuth, (req, res) => {
     res.send(`
         <body style="font-family:sans-serif; background:#f0f2f5; margin:0; padding:15px;">
@@ -310,7 +312,6 @@ app.get('/admin', checkAuth, (req, res) => {
                     document.getElementById('durationRange').value = d.slideDuration / 1000;
                     document.getElementById('valDuration').innerText = d.slideDuration / 1000;
                     
-                    // Mise à jour onglet système
                     document.getElementById('eventCodeInput').value = d.eventCode;
                     currentStatus = d.isEventActive;
                     const btn = document.getElementById('toggleEventBtn');
@@ -410,6 +411,7 @@ app.get('/gallery', checkEventAccess, (req, res) => {
     res.send(`<body style="background:#121212;color:white;font-family:sans-serif;padding:20px;text-align:center;"><h2>🖼️ Galerie</h2><div id="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;"></div><button onclick="location.href='/'" style="margin-top:20px;padding:10px;background:#007bff;color:white;border:none;border-radius:8px;">RETOUR</button><script src="/socket.io/socket.io.js"></script><script>const socket=io({ query: { page: 'gallery', name: localStorage.getItem('p_name') || 'Anonyme' } });socket.on('init_photos',data=>{const g=document.getElementById('grid');g.innerHTML="";const ps = data.photos; ps.forEach(p=>{g.innerHTML+='<img src="'+p.url+'" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px;">';});});</script></body>`);
 });
 
+// --- ROUTE DIAPORAMA (RETRO) ---
 app.get('/retro', (req, res) => {
     res.send(`
         <body style="background:black; color:white; margin:0; overflow:hidden; font-family:sans-serif; text-align:center; cursor: pointer;" onclick="toggleFS()">
@@ -420,7 +422,12 @@ app.get('/retro', (req, res) => {
                 <h1 id="msg">En attente...</h1>
                 <img id="img" style="max-width:100%; max-height:100vh; display:none; transition: opacity 1s; object-fit: contain;">
                 <div id="tag" style="position:absolute; bottom:50px; background:rgba(0,0,0,0.7); padding:10px 30px; border-radius:30px; font-size:30px; display:none;"></div>
+                
                 <div id="qr-container" style="position:absolute; bottom:20px; right:20px; background:white; padding:10px; border-radius:15px; display:flex; flex-direction:column; align-items:center; box-shadow: 0 0 20px rgba(0,0,0,0.5); z-index:20;">
+                    <div id="code-area" style="display:none; margin-bottom:5px; text-align:center;">
+                        <span style="color:#666; font-size:10px; font-weight:bold; display:block; text-transform:uppercase;">Code d'accès</span>
+                        <span id="code-display" style="color:#28a745; font-size:22px; font-weight:900; letter-spacing:2px;">----</span>
+                    </div>
                     <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://diapov2.onrender.com/" style="width:100px; height:100px;">
                     <span style="color:black; font-size:12px; font-weight:bold; margin-top:5px;">SCANNEZ-MOI !</span>
                 </div>
@@ -430,13 +437,37 @@ app.get('/retro', (req, res) => {
                 const socket = io({ query: { page: 'retro', name: 'Écran Diapo' } });
                 let list = []; let cur = 0; let t = null; let currentDuration = 7000;
                 function toggleFS() { if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(e => {}); }
-                socket.on('init_photos', (data) => { list = data.photos; currentDuration = data.duration; if (t) { clearInterval(t); t = setInterval(loop, currentDuration); } });
+                
+                // Mise à jour dynamique du code d'accès
+                socket.on('init_admin', d => {
+                    const codeArea = document.getElementById('code-area');
+                    const codeDisplay = document.getElementById('code-display');
+                    if(d.isEventActive) {
+                        codeArea.style.display = 'block';
+                        codeDisplay.innerText = d.eventCode;
+                    } else {
+                        codeArea.style.display = 'none';
+                    }
+                });
+
+                socket.on('init_photos', (data) => { 
+                    list = data.photos; 
+                    currentDuration = data.duration; 
+                    if (t) { clearInterval(t); t = setInterval(loop, currentDuration); } 
+                });
+                
                 function start(e) { e.stopPropagation(); toggleFS(); document.getElementById('start-btn').style.display='none'; if(list.length) loop(); }
+                
                 function loop() {
                     const i = document.getElementById('img'); const tag = document.getElementById('tag');
                     if(!list.length) return;
                     document.getElementById('msg').style.display='none'; i.style.display='block'; tag.style.display='block'; i.style.opacity = 0;
-                    setTimeout(() => { i.src = list[cur].url; tag.innerText = "📸 " + list[cur].user; i.style.opacity = 1; cur = (cur + 1) % list.length; }, 100);
+                    setTimeout(() => { 
+                        i.src = list[cur].url; 
+                        tag.innerText = "📸 " + list[cur].user; 
+                        i.style.opacity = 1; 
+                        cur = (cur + 1) % list.length; 
+                    }, 100);
                     if(!t) t = setInterval(loop, currentDuration);
                 }
             </script>
