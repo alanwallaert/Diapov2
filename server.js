@@ -22,6 +22,8 @@ let rejectedPhotos = [];
 let trashedPhotos = [];
 let autoApprove = false;
 let slideDuration = 7000;
+let eventCode = "1234"; // Code par défaut
+let isEventActive = true; // État de l'événement
 let activeClients = {};
 
 // Lecture de la base de données
@@ -33,11 +35,13 @@ if (fs.existsSync(DB_FILE)) {
         trashedPhotos = data.trashed || [];
         autoApprove = data.autoApprove || false;
         slideDuration = data.slideDuration || 7000;
+        eventCode = data.eventCode || "1234";
+        isEventActive = data.isEventActive !== undefined ? data.isEventActive : true;
     } catch(e) { console.log("Erreur lecture DB"); }
 }
 
 function saveDB() {
-    const data = { approved: approvedPhotos, rejected: rejectedPhotos, trashed: trashedPhotos, autoApprove, slideDuration };
+    const data = { approved: approvedPhotos, rejected: rejectedPhotos, trashed: trashedPhotos, autoApprove, slideDuration, eventCode, isEventActive };
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
@@ -49,12 +53,16 @@ const trashPath = path.join(publicPath, 'trash');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
+if (!fs.existsSync(USERS_FILE)) {
+    const hashed = bcrypt.hashSync("1234", 10);
+    fs.writeFileSync(USERS_FILE, JSON.stringify([{ id: "admin", pass: hashed }]));
+}
+
 app.use(session({ secret: 'prestation-top-secret', resave: false, saveUninitialized: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(publicPath));
 
-// --- ROUTE POUR L'INSTALLATION APP (PWA) ---
 app.get('/manifest.json', (req, res) => {
     res.sendFile(path.join(__dirname, 'manifest.json'));
 });
@@ -70,6 +78,33 @@ const checkAuth = (req, res, next) => {
     else res.redirect('/login');
 };
 
+// Protection pour les invités via code
+const checkEventAccess = (req, res, next) => {
+    if (!isEventActive) return res.send(`<body style="background:#121212;color:white;text-align:center;padding:50px;font-family:sans-serif;"><h1>🔒 Prestation terminée</h1><p>L'accès est fermé.</p></body>`);
+    if (req.session.hasAccess) return next();
+    res.send(`
+        <body style="background:#121212;color:white;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;">
+            <div style="background:#1e1e1e;padding:40px;border-radius:20px;text-align:center;width:300px;">
+                <h2 style="color:#28a745;">Code d'accès</h2>
+                <input type="text" id="c" placeholder="CODE ICI" style="width:100%;padding:15px;margin-bottom:20px;border-radius:10px;border:none;background:#333;color:white;text-align:center;font-size:24px;letter-spacing:3px;">
+                <button onclick="check()" style="width:100%;padding:15px;background:#28a745;color:white;border:none;border-radius:10px;font-weight:bold;cursor:pointer;">ENTRER</button>
+            </div>
+            <script>
+                async function check() {
+                    const code = document.getElementById('c').value;
+                    const res = await fetch('/verify-code', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({code}) });
+                    if(res.ok) location.reload(); else alert("Code incorrect !");
+                }
+            </script>
+        </body>
+    `);
+};
+
+app.post('/verify-code', (req, res) => {
+    if (req.body.code === eventCode) { req.session.hasAccess = true; res.sendStatus(200); }
+    else res.sendStatus(403);
+});
+
 function refreshAll() {
     saveDB();
     let stats = { home: [], gallery: [], retro: [] };
@@ -77,7 +112,7 @@ function refreshAll() {
         if (stats[c.page]) stats[c.page].push(c.name);
     });
     io.emit('init_photos', { photos: approvedPhotos, duration: slideDuration });
-    io.emit('init_admin', { approved: approvedPhotos, rejected: rejectedPhotos, trashed: trashedPhotos, autoApprove, slideDuration, stats: stats });
+    io.emit('init_admin', { approved: approvedPhotos, rejected: rejectedPhotos, trashed: trashedPhotos, autoApprove, slideDuration, eventCode, isEventActive, stats: stats });
 }
 
 io.on('connection', (socket) => {
@@ -87,7 +122,6 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => { delete activeClients[socket.id]; refreshAll(); });
 });
 
-// --- ROUTES LOGIN ---
 app.get('/login', (req, res) => {
     res.send(`
         <body style="font-family:sans-serif; background:#121212; color:white; display:flex; align-items:center; justify-content:center; height:100vh; margin:0;">
@@ -112,8 +146,7 @@ app.post('/login', (req, res) => {
 
 app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/login'); });
 
-// --- PAGE ACCUEIL ---
-app.get('/', (req, res) => {
+app.get('/', checkEventAccess, (req, res) => {
     res.send(`
         <!DOCTYPE html>
         <html lang="fr">
@@ -163,7 +196,6 @@ app.get('/', (req, res) => {
     `);
 });
 
-// --- PAGE ADMIN ---
 app.get('/admin', checkAuth, (req, res) => {
     res.send(`
         <body style="font-family:sans-serif; background:#f0f2f5; margin:0; padding:15px;">
@@ -212,15 +244,35 @@ app.get('/admin', checkAuth, (req, res) => {
                 <div id="tab-rejected" class="tab-content" style="display:none;"><div id="list-rejected" style="display:flex; flex-wrap:wrap; gap:10px;"></div></div>
                 <div id="tab-trashed" class="tab-content" style="display:none;"><div id="list-trashed" style="display:flex; flex-wrap:wrap; gap:10px;"></div></div>
             </div>
+
             <div id="main-users" class="main-tab" style="display:none;">
+                <div style="background:white; padding:20px; border-radius:15px; margin-bottom:15px; border:1px solid #eee;">
+                    <h3 style="margin-top:0; color:#007bff;">📱 PARAMÈTRES MOBILE</h3>
+                    <div style="display:flex; align-items:center; gap:15px; margin-bottom:20px;">
+                        <label style="font-weight:bold; flex:1;">Code d'accès Invités :</label>
+                        <input type="text" id="eventCodeInput" style="padding:10px; border-radius:8px; border:1px solid #ddd; width:100px; text-align:center; font-weight:bold;">
+                        <button onclick="updateEventCode()" style="padding:10px 20px; background:#28a745; color:white; border:none; border-radius:8px; cursor:pointer;">OK</button>
+                    </div>
+                    <hr style="border:0; border-top:1px solid #eee; margin:20px 0;">
+                    <div style="display:flex; align-items:center; justify-content:space-between;">
+                        <div>
+                            <b id="eventStatusLabel">L'événement est OUVERT</b><br>
+                            <small style="color:#666;">Permet ou bloque l'accès aux invités.</small>
+                        </div>
+                        <button id="toggleEventBtn" onclick="toggleEvent()" style="padding:10px 20px; border-radius:8px; border:none; color:white; font-weight:bold; cursor:pointer; min-width:120px;"></button>
+                    </div>
+                </div>
                 <div style="background:white; padding:20px; border-radius:15px; margin-bottom:15px;">
                     <h3 style="color:#dc3545;">⚠️ ZONE DANGER</h3>
                     <button onclick="resetSystem()" style="width:100%; padding:15px; background:#dc3545; color:white; border:none; border-radius:10px; font-weight:bold; cursor:pointer;">RÉINITIALISER TOUTES LES PHOTOS</button>
                 </div>
             </div>
+
             <script src="/socket.io/socket.io.js"></script>
             <script>
                 const socket = io();
+                let currentStatus = true;
+
                 function showMainTab(m) { document.querySelectorAll('.main-tab').forEach(el=>el.style.display='none'); document.getElementById('main-'+m).style.display='block'; }
                 function showTab(t) { 
                     document.querySelectorAll('.tab-content').forEach(el=>el.style.display='none'); 
@@ -232,6 +284,18 @@ app.get('/admin', checkAuth, (req, res) => {
                     if(t==='rejected') btn.style.background='#ffc107';
                     if(t==='trashed') btn.style.background='black', btn.style.color='white';
                 }
+
+                function updateEventCode() {
+                    const code = document.getElementById('eventCodeInput').value;
+                    fetch('/set-event-code', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({code}) });
+                    alert("Code mis à jour !");
+                }
+
+                function toggleEvent() {
+                    currentStatus = !currentStatus;
+                    fetch('/toggle-event', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({state: currentStatus}) });
+                }
+
                 socket.on('init_admin', d => {
                     const total = d.stats.home.length + d.stats.gallery.length + d.stats.retro.length;
                     document.getElementById('total-online').innerText = total;
@@ -239,11 +303,23 @@ app.get('/admin', checkAuth, (req, res) => {
                         '<b>🏠 Accueil ('+d.stats.home.length+'):</b><br>' + (d.stats.home.join(', ') || 'Aucun') + '<br><br>' +
                         '<b>🖼 Galerie ('+d.stats.gallery.length+'):</b><br>' + (d.stats.gallery.join(', ') || 'Aucun') + '<br><br>' +
                         '<b>📽 Diaporama ('+d.stats.retro.length+'):</b><br>' + (d.stats.retro.join(', ') || 'Aucun');
+                    
                     document.getElementById('nb-oui').innerText = d.approved.length;
                     document.getElementById('nb-non').innerText = d.rejected.length;
                     document.getElementById('autoCheck').checked = d.autoApprove;
                     document.getElementById('durationRange').value = d.slideDuration / 1000;
                     document.getElementById('valDuration').innerText = d.slideDuration / 1000;
+                    
+                    // Mise à jour onglet système
+                    document.getElementById('eventCodeInput').value = d.eventCode;
+                    currentStatus = d.isEventActive;
+                    const btn = document.getElementById('toggleEventBtn');
+                    const label = document.getElementById('eventStatusLabel');
+                    btn.innerText = currentStatus ? "FERMER" : "OUVRIR";
+                    btn.style.background = currentStatus ? "#dc3545" : "#28a745";
+                    label.innerText = currentStatus ? "L'événement est OUVERT" : "L'événement est FERMÉ";
+                    label.style.color = currentStatus ? "#28a745" : "#dc3545";
+
                     ['approved','rejected','trashed'].forEach(type => {
                         const l = document.getElementById('list-'+type); l.innerHTML = "";
                         d[type].forEach(p => {
@@ -258,6 +334,7 @@ app.get('/admin', checkAuth, (req, res) => {
                         });
                     });
                 });
+
                 socket.on('new_photo_pending', p => {
                     const l = document.getElementById('list-pending');
                     const div = document.createElement('div'); div.style = "background:white; padding:10px; border-radius:10px; width:130px; border:2px solid #007bff;";
@@ -266,6 +343,7 @@ app.get('/admin', checkAuth, (req, res) => {
                         '<button onclick="this.parentElement.remove(); act(\\'/reject\\',\\''+p.url+'\\',\\''+p.user+'\\')" style="background:#dc3545;color:white;width:48%;border:none;padding:5px;">NON</button>';
                     l.prepend(div);
                 });
+
                 function act(r,u,usr) { fetch(r,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u,user:usr})}); }
                 function resetSystem() { if(confirm("Voulez-vous vraiment TOUT effacer ?")) fetch('/admin/reset',{method:'POST'}).then(()=>location.reload()); }
             </script>
@@ -274,6 +352,9 @@ app.get('/admin', checkAuth, (req, res) => {
 });
 
 // --- ACTIONS ADMIN ---
+app.post('/set-event-code', checkAuth, (req, res) => { eventCode = req.body.code; refreshAll(); res.sendStatus(200); });
+app.post('/toggle-event', checkAuth, (req, res) => { isEventActive = req.body.state; refreshAll(); res.sendStatus(200); });
+
 app.get('/admin/download-zip', checkAuth, async (req, res) => {
     const zip = new JSZip();
     approvedPhotos.forEach(p => {
@@ -282,7 +363,7 @@ app.get('/admin/download-zip', checkAuth, async (req, res) => {
     });
     const content = await zip.generateAsync({ type: "nodebuffer" });
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename=photos.zip');
+    res.setHeader('Content-Disposition', 'attachment; filename=photos_evenement.zip');
     res.send(content);
 });
 
@@ -325,7 +406,7 @@ app.post('/upload', upload.single('photo'), (req, res) => {
     res.sendStatus(200);
 });
 
-app.get('/gallery', (req, res) => {
+app.get('/gallery', checkEventAccess, (req, res) => {
     res.send(`<body style="background:#121212;color:white;font-family:sans-serif;padding:20px;text-align:center;"><h2>🖼️ Galerie</h2><div id="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;"></div><button onclick="location.href='/'" style="margin-top:20px;padding:10px;background:#007bff;color:white;border:none;border-radius:8px;">RETOUR</button><script src="/socket.io/socket.io.js"></script><script>const socket=io({ query: { page: 'gallery', name: localStorage.getItem('p_name') || 'Anonyme' } });socket.on('init_photos',data=>{const g=document.getElementById('grid');g.innerHTML="";const ps = data.photos; ps.forEach(p=>{g.innerHTML+='<img src="'+p.url+'" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px;">';});});</script></body>`);
 });
 
@@ -363,7 +444,5 @@ app.get('/retro', (req, res) => {
     `);
 });
 
-// Ping automatique Render
 setInterval(() => { http.get('https://diapov2.onrender.com/', (res) => console.log("Ping OK")); }, 840000);
-
 server.listen(PORT, () => { console.log("🚀 Serveur lancé sur le port " + PORT); refreshAll(); });
