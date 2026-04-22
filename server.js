@@ -6,15 +6,14 @@ const path = require('path');
 const fs = require('fs');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
-const JSZip = require('jszip'); // Ajout pour le ZIP
+const JSZip = require('jszip');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
 // --- CONFIGURATION ---
-const PORT = 3000;
-const MY_IP = "192.168.1.58"; 
+const PORT = process.env.PORT || 3000; // Adapté pour Render
 const USERS_FILE = './users.json';
 const DB_FILE = './database.json';
 
@@ -25,6 +24,7 @@ let autoApprove = false;
 let slideDuration = 7000;
 let activeClients = {};
 
+// Lecture de la base de données
 if (fs.existsSync(DB_FILE)) {
     try {
         const data = JSON.parse(fs.readFileSync(DB_FILE));
@@ -157,7 +157,7 @@ app.get('/admin', checkAuth, (req, res) => {
         <body style="font-family:sans-serif; background:#f0f2f5; margin:0; padding:15px;">
             <div style="background:white; padding:15px; border-radius:15px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 10px rgba(0,0,0,0.1); margin-bottom:15px;">
                 <div style="display:flex; align-items:center; gap:10px;">
-                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=http://${MY_IP}:${PORT}" style="width:40px; border-radius:5px;">
+                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://diapov2.onrender.com/" style="width:60px; border-radius:5px;">
                     <h1 style="margin:0; font-size:18px;">🛡 Admin</h1>
                 </div>
                 
@@ -274,7 +274,6 @@ app.get('/admin', checkAuth, (req, res) => {
     `);
 });
 
-// --- ROUTE ZIP ---
 app.get('/admin/download-zip', checkAuth, async (req, res) => {
     const zip = new JSZip();
     approvedPhotos.forEach(p => {
@@ -366,6 +365,6 @@ app.get('/gallery', (req, res) => {
 });
 
 server.listen(PORT, () => {
-    console.log("🚀 Prêt sur http://" + MY_IP + ":" + PORT + "/login");
+    console.log("🚀 Prêt sur le port " + PORT);
     refreshAll();
 });
