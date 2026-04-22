@@ -1,0 +1,20 @@
+{
+  "approved": [
+    {
+      "url": "/uploads/1776886937599.jpg",
+      "user": "tg"
+    },
+    {
+      "url": "/uploads/1776886963297.jpg",
+      "user": "tg"
+    },
+    {
+      "url": "/uploads/1776887120046.jpg",
+      "user": "Mick"
+    }
+  ],
+  "rejected": [],
+  "trashed": [],
+  "autoApprove": false,
+  "slideDuration": 2000
+}
