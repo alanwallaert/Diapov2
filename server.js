@@ -87,7 +87,7 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => { delete activeClients[socket.id]; refreshAll(); });
 });
 
-// --- ROUTES ---
+// --- TOUTES TES ROUTES (LOGIN, ADMIN, RETRO, UPLOAD, ETC.) ---
 
 app.get('/login', (req, res) => {
     res.send(`
@@ -160,19 +160,16 @@ app.get('/admin', checkAuth, (req, res) => {
                     <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://diapov2.onrender.com/" style="width:60px; border-radius:5px;">
                     <h1 style="margin:0; font-size:18px;">🛡 Admin</h1>
                 </div>
-                
                 <div onclick="document.getElementById('userModal').style.display='flex'" style="background:#e1f5fe; padding:8px 15px; border-radius:20px; cursor:pointer; text-align:center; border:1px solid #01579b;">
                     <span style="color:#01579b; font-weight:bold; font-size:12px;">👥 CONNECTÉS</span><br>
                     <span id="total-online" style="font-size:18px; font-weight:bold; color:#01579b;">0</span>
                 </div>
-
                 <div style="display:flex; gap:10px;">
                     <button onclick="showMainTab('photos')" style="padding:8px; border-radius:5px; border:none; background:#444; color:white;">PHOTOS</button>
                     <button onclick="showMainTab('users')" style="padding:8px; border-radius:5px; border:none; background:#444; color:white;">SYSTÈME</button>
                     <a href="/logout" style="text-decoration:none; color:white; background:#dc3545; padding:8px; border-radius:5px;">X</a>
                 </div>
             </div>
-
             <div id="userModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:1000; align-items:center; justify-content:center; padding:20px;" onclick="this.style.display='none'">
                 <div style="background:white; width:100%; max-width:400px; border-radius:15px; padding:20px;" onclick="event.stopPropagation()">
                     <h2 style="margin-top:0; border-bottom:2px solid #eee; padding-bottom:10px;">Utilisateurs en ligne</h2>
@@ -180,7 +177,6 @@ app.get('/admin', checkAuth, (req, res) => {
                     <button onclick="document.getElementById('userModal').style.display='none'" style="width:100%; margin-top:20px; padding:12px; background:#444; color:white; border:none; border-radius:8px; font-weight:bold;">FERMER</button>
                 </div>
             </div>
-
             <div id="main-photos" class="main-tab">
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:15px;">
                     <div style="background:#fff; padding:12px; border-radius:10px; border:2px solid #28a745; display:flex; align-items:center; justify-content:space-between;">
@@ -192,9 +188,7 @@ app.get('/admin', checkAuth, (req, res) => {
                         <input type="range" min="2" max="30" value="7" id="durationRange" style="width:100%;" oninput="document.getElementById('valDuration').innerText=this.value" onchange="fetch('/set-duration', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({duration: this.value * 1000})})">
                     </div>
                 </div>
-
-                <button onclick="location.href='/admin/download-zip'" style="width:100%; padding:15px; background:#6f42c1; color:white; border:none; border-radius:10px; font-weight:bold; margin-bottom:15px; cursor:pointer; box-shadow: 0 4px 0 #59359a;">📥 TÉLÉCHARGER TOUTES LES PHOTOS (ZIP)</button>
-
+                <button onclick="location.href='/admin/download-zip'" style="width:100%; padding:15px; background:#6f42c1; color:white; border:none; border-radius:10px; font-weight:bold; margin-bottom:15px; cursor:pointer; box-shadow: 0 4px 0 #59359a;">📥 TÉLÉCHARGER (ZIP)</button>
                 <div style="display:flex; gap:5px; margin-bottom:15px;">
                     <button onclick="showTab('pending')" id="btn-pending" style="flex:1; padding:10px; border:none; border-radius:8px; background:#007bff; color:white; font-size:12px;">ATTENTE</button>
                     <button onclick="showTab('approved')" id="btn-approved" style="flex:1; padding:10px; border:none; border-radius:8px; background:#ddd; font-size:12px;">OUI (<span id="nb-oui">0</span>)</button>
@@ -206,14 +200,12 @@ app.get('/admin', checkAuth, (req, res) => {
                 <div id="tab-rejected" class="tab-content" style="display:none;"><div id="list-rejected" style="display:flex; flex-wrap:wrap; gap:10px;"></div></div>
                 <div id="tab-trashed" class="tab-content" style="display:none;"><div id="list-trashed" style="display:flex; flex-wrap:wrap; gap:10px;"></div></div>
             </div>
-
             <div id="main-users" class="main-tab" style="display:none;">
                 <div style="background:white; padding:20px; border-radius:15px; margin-bottom:15px;">
                     <h3 style="color:#dc3545;">⚠️ ZONE DANGER</h3>
                     <button onclick="resetSystem()" style="width:100%; padding:15px; background:#dc3545; color:white; border:none; border-radius:10px; font-weight:bold; cursor:pointer;">RÉINITIALISER TOUTES LES PHOTOS</button>
                 </div>
             </div>
-
             <script src="/socket.io/socket.io.js"></script>
             <script>
                 const socket = io();
@@ -228,7 +220,6 @@ app.get('/admin', checkAuth, (req, res) => {
                     if(t==='rejected') btn.style.background='#ffc107';
                     if(t==='trashed') btn.style.background='black', btn.style.color='white';
                 }
-
                 socket.on('init_admin', d => {
                     const total = d.stats.home.length + d.stats.gallery.length + d.stats.retro.length;
                     document.getElementById('total-online').innerText = total;
@@ -236,13 +227,11 @@ app.get('/admin', checkAuth, (req, res) => {
                         '<b>🏠 Accueil ('+d.stats.home.length+'):</b><br>' + (d.stats.home.join(', ') || 'Aucun') + '<br><br>' +
                         '<b>🖼 Galerie ('+d.stats.gallery.length+'):</b><br>' + (d.stats.gallery.join(', ') || 'Aucun') + '<br><br>' +
                         '<b>📽 Diaporama ('+d.stats.retro.length+'):</b><br>' + (d.stats.retro.join(', ') || 'Aucun');
-
                     document.getElementById('nb-oui').innerText = d.approved.length;
                     document.getElementById('nb-non').innerText = d.rejected.length;
                     document.getElementById('autoCheck').checked = d.autoApprove;
                     document.getElementById('durationRange').value = d.slideDuration / 1000;
                     document.getElementById('valDuration').innerText = d.slideDuration / 1000;
-                    
                     ['approved','rejected','trashed'].forEach(type => {
                         const l = document.getElementById('list-'+type); l.innerHTML = "";
                         d[type].forEach(p => {
@@ -257,7 +246,6 @@ app.get('/admin', checkAuth, (req, res) => {
                         });
                     });
                 });
-
                 socket.on('new_photo_pending', p => {
                     const l = document.getElementById('list-pending');
                     const div = document.createElement('div'); div.style = "background:white; padding:10px; border-radius:10px; width:130px; border:2px solid #007bff;";
@@ -266,7 +254,6 @@ app.get('/admin', checkAuth, (req, res) => {
                     '<button onclick="this.parentElement.remove(); act(\\'/reject\\',\\''+p.url+'\\',\\''+p.user+'\\')" style="background:#dc3545;color:white;width:48%;border:none;padding:5px;">NON</button>';
                     l.prepend(div);
                 });
-
                 function act(r,u,usr) { fetch(r,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u,user:usr})}); }
                 function resetSystem() { if(confirm("Voulez-vous vraiment TOUT effacer ?")) fetch('/admin/reset',{method:'POST'}).then(()=>location.reload()); }
             </script>
@@ -299,7 +286,6 @@ app.get('/retro', (req, res) => {
                 <h1 id="msg">En attente...</h1>
                 <img id="img" style="max-width:100%; max-height:100vh; display:none; transition: opacity 1s; object-fit: contain;">
                 <div id="tag" style="position:absolute; bottom:50px; background:rgba(0,0,0,0.7); padding:10px 30px; border-radius:30px; font-size:30px; display:none;"></div>
-                
                 <div id="qr-container" style="position:absolute; bottom:20px; right:20px; background:white; padding:10px; border-radius:15px; display:flex; flex-direction:column; align-items:center; box-shadow: 0 0 20px rgba(0,0,0,0.5); z-index:20;">
                     <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://diapov2.onrender.com/" style="width:100px; height:100px;">
                     <span style="color:black; font-size:12px; font-weight:bold; margin-top:5px;">SCANNEZ-MOI !</span>
@@ -369,7 +355,17 @@ app.get('/gallery', (req, res) => {
     res.send(`<body style="background:#121212;color:white;font-family:sans-serif;padding:20px;text-align:center;"><h2>🖼️ Galerie</h2><div id="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;"></div><button onclick="location.href='/'" style="margin-top:20px;padding:10px;background:#007bff;color:white;border:none;border-radius:8px;">RETOUR</button><script src="/socket.io/socket.io.js"></script><script>const socket=io({ query: { page: 'gallery', name: localStorage.getItem('p_name') || 'Anonyme' } });socket.on('init_photos',data=>{const g=document.getElementById('grid');g.innerHTML="";const ps = data.photos; ps.forEach(p=>{g.innerHTML+='<img src="'+p.url+'" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px;">';});});</script></body>`);
 });
 
+// --- SCRIPT ANTI-SOMMEIL (KEEP-ALIVE) ---
+const URL_DU_SITE = 'https://diapov2.onrender.com/';
+setInterval(() => {
+    fetch(URL_DU_SITE)
+        .then(res => console.log(`[Keep-Alive] Ping réussi : ${res.status} à ${new Date().toLocaleTimeString()}`))
+        .catch(err => console.error(`[Keep-Alive] Erreur : ${err.message}`));
+}, 840000); // 14 minutes
+
+// --- DÉMARRAGE FINAL ---
 server.listen(PORT, () => {
-    console.log("🚀 Prêt sur le port " + PORT);
+    console.log("🚀 Serveur lancé sur le port " + PORT);
+    console.log("🛠️ Système anti-sommeil activé pour " + URL_DU_SITE);
     refreshAll();
 });
