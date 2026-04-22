@@ -59,6 +59,11 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(publicPath));
 
+// --- ROUTE POUR L'INSTALLATION APP (PWA) ---
+app.get('/manifest.json', (req, res) => {
+    res.sendFile(path.join(__dirname, 'manifest.json'));
+});
+
 const storage = multer.diskStorage({
     destination: uploadPath,
     filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
@@ -113,8 +118,19 @@ app.post('/login', (req, res) => {
 
 app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/login'); });
 
+// --- PAGE ACCUEIL MISE À JOUR POUR MODE APP ---
 app.get('/', (req, res) => {
     res.send(`
+        <!DOCTYPE html>
+        <html lang="fr">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <link rel="manifest" href="/manifest.json">
+            <meta name="apple-mobile-web-app-capable" content="yes">
+            <meta name="theme-color" content="#28a745">
+            <title>Prestation Photo</title>
+        </head>
         <body style="font-family:sans-serif; text-align:center; background:#121212; color:white; padding:20px; margin:0;">
             <div style="background:#1e1e1e; padding:25px; border-radius:20px; max-width:400px; margin:auto;">
                 <h2 style="margin-bottom:25px;">📸 Prestation</h2>
@@ -149,6 +165,7 @@ app.get('/', (req, res) => {
                 }
             </script>
         </body>
+        </html>
     `);
 });
 
@@ -261,11 +278,9 @@ app.get('/admin', checkAuth, (req, res) => {
     `);
 });
 
-// --- FIX ZIP (NETTOYAGE DU CHEMIN) ---
 app.get('/admin/download-zip', checkAuth, async (req, res) => {
     const zip = new JSZip();
     approvedPhotos.forEach(p => {
-        // Supprime le / initial pour éviter les erreurs de chemin sur Render
         const relativePath = p.url.replace(/^\//, '');
         const filePath = path.join(publicPath, relativePath);
         if (fs.existsSync(filePath)) {
@@ -323,7 +338,6 @@ app.post('/upload', upload.single('photo'), (req, res) => {
     res.sendStatus(200);
 });
 
-// --- FIX DOUBLONS DANS LES ACTIONS ---
 app.post('/approve', checkAuth, (req, res) => {
     const p = req.body;
     trashedPhotos = trashedPhotos.filter(x => x.url !== p.url);
@@ -359,10 +373,10 @@ app.get('/gallery', (req, res) => {
     res.send(`<body style="background:#121212;color:white;font-family:sans-serif;padding:20px;text-align:center;"><h2>🖼️ Galerie</h2><div id="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;"></div><button onclick="location.href='/'" style="margin-top:20px;padding:10px;background:#007bff;color:white;border:none;border-radius:8px;">RETOUR</button><script src="/socket.io/socket.io.js"></script><script>const socket=io({ query: { page: 'gallery', name: localStorage.getItem('p_name') || 'Anonyme' } });socket.on('init_photos',data=>{const g=document.getElementById('grid');g.innerHTML="";const ps = data.photos; ps.forEach(p=>{g.innerHTML+='<img src="'+p.url+'" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px;">';});});</script></body>`);
 });
 
-const URL_DU_SITE = 'https://diapov2.onrender.com/';
+// Ping automatique pour éviter la mise en veille de Render
 setInterval(() => {
-    http.get(URL_DU_SITE, (res) => console.log("Ping OK"));
-}, 840000); // 14 minutes
+    http.get('https://diapov2.onrender.com/', (res) => console.log("Ping OK"));
+}, 840000); 
 
 server.listen(PORT, () => {
     console.log("🚀 Serveur lancé sur le port " + PORT);
