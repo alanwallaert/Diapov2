@@ -87,7 +87,7 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => { delete activeClients[socket.id]; refreshAll(); });
 });
 
-// --- TOUTES TES ROUTES (LOGIN, ADMIN, RETRO, UPLOAD, ETC.) ---
+// --- ROUTES ---
 
 app.get('/login', (req, res) => {
     res.send(`
@@ -261,10 +261,13 @@ app.get('/admin', checkAuth, (req, res) => {
     `);
 });
 
+// --- FIX ZIP (NETTOYAGE DU CHEMIN) ---
 app.get('/admin/download-zip', checkAuth, async (req, res) => {
     const zip = new JSZip();
     approvedPhotos.forEach(p => {
-        const filePath = path.join(publicPath, p.url);
+        // Supprime le / initial pour éviter les erreurs de chemin sur Render
+        const relativePath = p.url.replace(/^\//, '');
+        const filePath = path.join(publicPath, relativePath);
         if (fs.existsSync(filePath)) {
             const fileData = fs.readFileSync(filePath);
             zip.file(path.basename(p.url), fileData);
@@ -320,18 +323,19 @@ app.post('/upload', upload.single('photo'), (req, res) => {
     res.sendStatus(200);
 });
 
+// --- FIX DOUBLONS DANS LES ACTIONS ---
 app.post('/approve', checkAuth, (req, res) => {
     const p = req.body;
     trashedPhotos = trashedPhotos.filter(x => x.url !== p.url);
     rejectedPhotos = rejectedPhotos.filter(x => x.url !== p.url);
-    if(!approvedPhotos.find(x => x.url === p.url)) approvedPhotos.push(p);
+    if(!approvedPhotos.some(x => x.url === p.url)) approvedPhotos.push(p);
     refreshAll(); res.sendStatus(200);
 });
 
 app.post('/reject', checkAuth, (req, res) => {
     const p = req.body;
     approvedPhotos = approvedPhotos.filter(x => x.url !== p.url);
-    if(!rejectedPhotos.find(x => x.url === p.url)) rejectedPhotos.push(p);
+    if(!rejectedPhotos.some(x => x.url === p.url)) rejectedPhotos.push(p);
     refreshAll(); res.sendStatus(200);
 });
 
@@ -339,7 +343,7 @@ app.post('/delete', checkAuth, (req, res) => {
     const p = req.body;
     approvedPhotos = approvedPhotos.filter(x => x.url !== p.url);
     rejectedPhotos = rejectedPhotos.filter(x => x.url !== p.url);
-    if(!trashedPhotos.find(x => x.url === p.url)) trashedPhotos.push(p);
+    if(!trashedPhotos.some(x => x.url === p.url)) trashedPhotos.push(p);
     refreshAll(); res.sendStatus(200);
 });
 
@@ -355,17 +359,12 @@ app.get('/gallery', (req, res) => {
     res.send(`<body style="background:#121212;color:white;font-family:sans-serif;padding:20px;text-align:center;"><h2>🖼️ Galerie</h2><div id="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;"></div><button onclick="location.href='/'" style="margin-top:20px;padding:10px;background:#007bff;color:white;border:none;border-radius:8px;">RETOUR</button><script src="/socket.io/socket.io.js"></script><script>const socket=io({ query: { page: 'gallery', name: localStorage.getItem('p_name') || 'Anonyme' } });socket.on('init_photos',data=>{const g=document.getElementById('grid');g.innerHTML="";const ps = data.photos; ps.forEach(p=>{g.innerHTML+='<img src="'+p.url+'" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px;">';});});</script></body>`);
 });
 
-// --- SCRIPT ANTI-SOMMEIL (KEEP-ALIVE) ---
 const URL_DU_SITE = 'https://diapov2.onrender.com/';
 setInterval(() => {
-    fetch(URL_DU_SITE)
-        .then(res => console.log(`[Keep-Alive] Ping réussi : ${res.status} à ${new Date().toLocaleTimeString()}`))
-        .catch(err => console.error(`[Keep-Alive] Erreur : ${err.message}`));
+    http.get(URL_DU_SITE, (res) => console.log("Ping OK"));
 }, 840000); // 14 minutes
 
-// --- DÉMARRAGE FINAL ---
 server.listen(PORT, () => {
     console.log("🚀 Serveur lancé sur le port " + PORT);
-    console.log("🛠️ Système anti-sommeil activé pour " + URL_DU_SITE);
     refreshAll();
 });
