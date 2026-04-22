@@ -1,0 +1,16 @@
+{
+  "short_name": "DiapoV2",
+  "name": "DiapoV2 Live Photo",
+  "icons": [
+    {
+      "src": "https://api.qrserver.com/v1/create-qr-code/?size=192x192&data=https://diapov2.onrender.com/",
+      "type": "image/png",
+      "sizes": "192x192"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#121212",
+  "display": "standalone",
+  "scope": "/",
+  "theme_color": "#28a745"
+}
