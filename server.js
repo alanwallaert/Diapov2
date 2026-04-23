@@ -9,21 +9,21 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// --- CONFIGURATION ---
 const PORT = process.env.PORT || 3000;
+
+// --- STOCKAGE DES PHOTOS ---
 let approvedPhotos = []; 
 let rejectedPhotos = []; 
 let trashedPhotos = [];
+let pendingPhotos = []; // Photos en attente de validation
 let autoApprove = false;
-let slideDuration = 2000; // Calqué sur ton image (2s)
-let transitionType = "crossfade";
+let slideDuration = 2000;
 
-const publicPath = path.join(__dirname, 'public');
-const uploadPath = path.join(publicPath, 'uploads');
+const uploadPath = path.join(__dirname, 'public/uploads');
 if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
 
 app.use(express.json());
-app.use(express.static(publicPath));
+app.use(express.static('public'));
 
 const upload = multer({ storage: multer.diskStorage({
     destination: uploadPath,
@@ -31,170 +31,158 @@ const upload = multer({ storage: multer.diskStorage({
 })});
 
 // --- LOGIQUE SOCKET ---
-function updateAdmin() {
-    io.emit('init_admin', { approved: approvedPhotos, rejected: rejectedPhotos, trashed: trashedPhotos, autoApprove, slideDuration, transitionType });
+function sendAdminUpdate() {
+    io.emit('init_admin', { 
+        approved: approvedPhotos, 
+        rejected: rejectedPhotos, 
+        trashed: trashedPhotos, 
+        pending: pendingPhotos,
+        autoApprove, 
+        slideDuration 
+    });
 }
 
 io.on('connection', (socket) => {
-    socket.emit('init_photos', { photos: approvedPhotos, duration: slideDuration, transitionType });
-    updateAdmin();
+    socket.emit('init_photos', { photos: approvedPhotos, duration: slideDuration });
+    sendAdminUpdate();
 });
 
-// --- ROUTES API ---
+// --- ROUTES ---
+
+// Upload depuis le téléphone
 app.post('/upload', upload.single('photo'), (req, res) => {
     const data = { url: '/uploads/' + req.file.filename, user: req.body.username || 'Anonyme' };
-    if (autoApprove) { approvedPhotos.push(data); io.emit('init_photos', { photos: approvedPhotos, duration: slideDuration, transitionType }); }
-    io.emit('new_photo_pending', data);
+    if (autoApprove) {
+        approvedPhotos.push(data);
+        io.emit('init_photos', { photos: approvedPhotos, duration: slideDuration });
+    } else {
+        pendingPhotos.push(data);
+    }
+    sendAdminUpdate();
     res.sendStatus(200);
 });
 
+// Actions Admin (Approuver, Rejeter, Poubelle)
 app.post('/action', (req, res) => {
     const { action, photo } = req.body;
-    // Nettoyage
+    // On retire la photo de toutes les listes d'abord
+    pendingPhotos = pendingPhotos.filter(p => p.url !== photo.url);
     approvedPhotos = approvedPhotos.filter(p => p.url !== photo.url);
     rejectedPhotos = rejectedPhotos.filter(p => p.url !== photo.url);
+    trashedPhotos = trashedPhotos.filter(p => p.url !== photo.url);
     
     if (action === 'approve') approvedPhotos.push(photo);
     if (action === 'reject') rejectedPhotos.push(photo);
     if (action === 'trash') trashedPhotos.push(photo);
 
-    io.emit('init_photos', { photos: approvedPhotos, duration: slideDuration, transitionType });
-    updateAdmin();
+    io.emit('init_photos', { photos: approvedPhotos, duration: slideDuration });
+    sendAdminUpdate();
     res.sendStatus(200);
 });
 
-// --- PAGES ---
+// --- PAGES HTML ---
 
-// 1. PAGE PUBLIC (2 Boutons : Photo et Album)
+// PAGE PUBLIC
 app.get('/', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
     body { font-family:sans-serif; background:#121212; color:white; text-align:center; padding:20px; }
-    .card { background:#1e1e1e; padding:30px; border-radius:20px; max-width:400px; margin:auto; box-shadow:0 10px 20px rgba(0,0,0,0.3); }
-    .btn { display:block; width:100%; padding:20px; margin:10px 0; border-radius:12px; border:none; font-weight:bold; cursor:pointer; font-size:16px; }
-    .btn-cam { background:#007bff; color:white; }
-    .btn-gal { background:#6f42c1; color:white; }
+    .btn { display:block; width:100%; padding:20px; margin:10px 0; border-radius:15px; border:none; font-weight:bold; cursor:pointer; font-size:18px; }
+    .btn-photo { background:#007bff; color:white; }
+    .btn-album { background:#6f42c1; color:white; }
     .btn-send { background:#28a745; color:white; display:none; }
-    input[type="text"] { width:100%; padding:15px; border-radius:10px; border:none; background:#333; color:white; margin-bottom:15px; box-sizing:border-box; }
+    input { width:100%; padding:15px; border-radius:10px; border:none; margin-bottom:15px; box-sizing:border-box; }
     </style></head><body>
-    <div class="card">
-        <h2>📸 Partagez</h2>
-        <input type="text" id="user" placeholder="Votre Prénom">
-        <label class="btn btn-cam">📷 PRENDRE UNE PHOTO <input type="file" accept="image/*" capture="camera" id="f1" style="display:none" onchange="preview(this)"></label>
-        <label class="btn btn-gal">🖼️ DEPUIS L'ALBUM <input type="file" accept="image/*" id="f2" style="display:none" onchange="preview(this)"></label>
-        <button id="send" class="btn btn-send" onclick="send()">🚀 ENVOYER MAINTENANT</button>
-    </div>
+    <h2>📸 Partage Photo</h2>
+    <input type="text" id="user" placeholder="Ton Prénom">
+    <label class="btn btn-photo">📷 PRENDRE UNE PHOTO <input type="file" accept="image/*" capture="camera" style="display:none" onchange="preview(this)"></label>
+    <label class="btn btn-album">🖼️ DEPUIS L'ALBUM <input type="file" accept="image/*" style="display:none" onchange="preview(this)"></label>
+    <button id="send" class="btn btn-send" onclick="send()">🚀 ENVOYER</button>
     <script>
     let file;
-    function preview(el){ file = el.files[0]; if(file){ document.getElementById('send').style.display='block'; } }
+    function preview(el){ file = el.files[0]; if(file) document.getElementById('send').style.display='block'; }
     async function send(){
-        const u = document.getElementById('user').value || 'Anonyme';
-        const fd = new FormData(); fd.append('photo', file); fd.append('username', u);
+        const fd = new FormData(); fd.append('photo', file); fd.append('username', document.getElementById('user').value);
         await fetch('/upload', {method:'POST', body:fd}); alert('Envoyé !'); location.reload();
     }
     </script></body></html>`);
 });
 
-// 2. PAGE ADMIN (Design calqué sur ton image)
+// PAGE ADMIN (AVEC COULEURS ET DESIGN IMAGE)
 app.get('/admin', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><style>
     body { font-family:sans-serif; background:#f4f7f9; margin:0; }
-    .header { background:white; padding:15px 30px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 5px rgba(0,0,0,0.05); }
-    .config-bar { display:flex; gap:20px; padding:15px 30px; background:#f4f7f9; }
-    .config-item { background:white; padding:10px 20px; border-radius:8px; display:flex; align-items:center; gap:10px; box-shadow:0 2px 4px rgba(0,0,0,0.03); flex:1; }
-    .tabs { padding:0 30px; display:flex; gap:10px; margin-top:20px; }
-    .tab { padding:10px 20px; border-radius:8px; cursor:pointer; font-weight:bold; border:none; }
-    .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:15px; padding:30px; }
-    .photo-card { background:white; padding:10px; border-radius:10px; text-align:center; box-shadow:0 2px 5px rgba(0,0,0,0.1); }
-    .photo-card img { width:100%; height:120px; object-fit:cover; border-radius:5px; }
-    .btn-group { display:flex; gap:5px; margin-top:10px; }
-    .btn-group button { flex:1; border:none; padding:5px; border-radius:4px; color:white; cursor:pointer; font-size:10px; }
+    .header { background:white; padding:15px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 10px rgba(0,0,0,0.1); }
+    .config { display:flex; gap:10px; padding:15px; background:#e9ecef; }
+    .card-config { background:white; padding:10px; border-radius:8px; flex:1; text-align:center; font-weight:bold; }
+    .tabs { display:flex; padding:10px; gap:5px; }
+    .tab { flex:1; padding:15px; border:none; border-radius:8px; color:white; font-weight:bold; cursor:pointer; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:10px; padding:10px; }
+    .p-card { background:white; padding:8px; border-radius:10px; text-align:center; box-shadow:0 2px 5px rgba(0,0,0,0.1); }
+    .p-card img { width:100%; height:100px; object-fit:cover; border-radius:5px; }
+    .btns { display:flex; gap:3px; margin-top:8px; }
+    .btns button { flex:1; border:none; padding:8px 0; border-radius:4px; color:white; cursor:pointer; font-size:10px; font-weight:bold; }
     </style></head><body>
     <div class="header">
-        <h2 style="margin:0; display:flex; align-items:center; gap:10px;">🛡️ Admin</h2>
-        <div>
-            <button style="padding:8px 15px; border:1px solid #ddd; background:white; border-radius:5px;">PHOTOS</button>
-            <button style="padding:8px 15px; border:1px solid #ddd; background:white; border-radius:5px;">CONFIG</button>
-            <button style="padding:8px 15px; background:#ff4757; color:white; border:none; border-radius:5px;">QUITTER</button>
-        </div>
+        <h2 style="margin:0">🛡️ Admin Control</h2>
+        <button style="background:#dc3545; color:white; border:none; padding:10px; border-radius:5px;">QUITTER</button>
     </div>
-    <div class="config-bar">
-        <div class="config-item">AUTO: <input type="checkbox" id="auto"></div>
-        <div class="config-item">TEMPS: <input type="number" id="dur" value="2" style="width:40px"> s</div>
-        <div class="config-item">EFFET: <select id="eff"><option value="crossfade">Croisé</option></select></div>
+    <div class="config">
+        <div class="card-config">AUTO: <input type="checkbox" id="auto"></div>
+        <div class="card-config">TEMPS: <input type="number" id="dur" value="2" style="width:40px">s</div>
+        <div class="card-config">EFFET: Croisé</div>
     </div>
     <div class="tabs">
-        <button class="tab" style="background:#007bff; color:white" onclick="show('wait')">ATTENTE</button>
-        <button class="tab" style="background:#28a745; color:white" onclick="show('yes')">OUI</button>
-        <button class="tab" style="background:#ffc107; color:black" onclick="show('no')">NON</button>
-        <button class="tab" style="background:#333; color:white" onclick="show('trash')">POUBELLE</button>
+        <button class="tab" style="background:#007bff" onclick="curr='pending';render()">ATTENTE</button>
+        <button class="tab" style="background:#28a745" onclick="curr='approved';render()">OUI</button>
+        <button class="tab" style="background:#ffc107; color:black" onclick="curr='rejected';render()">NON</button>
+        <button class="tab" style="background:#343a40" onclick="curr='trashed';render()">POUBELLE</button>
     </div>
-    <div id="container" class="grid"></div>
+    <div id="grid" class="grid"></div>
     <script src="/socket.io/socket.io.js"></script>
     <script>
     const socket = io();
-    let currentTab = 'wait';
-    let data = { approved:[], rejected:[], trashed:[] };
-    let pending = [];
-
-    function show(tab) { currentTab = tab; render(); }
+    let curr = 'pending';
+    let state = {};
     function act(action, photo) { fetch('/action', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action, photo})}); }
-
-    socket.on('init_admin', d => { data = d; render(); });
-    socket.on('new_photo_pending', p => { pending.push(p); render(); });
-
+    socket.on('init_admin', d => { state = d; render(); });
     function render() {
-        const c = document.getElementById('container'); c.innerHTML = '';
-        let list = [];
-        if(currentTab === 'wait') list = pending;
-        else if(currentTab === 'yes') list = data.approved;
-        else if(currentTab === 'no') list = data.rejected;
-        else list = data.trashed;
-
+        const g = document.getElementById('grid'); g.innerHTML = '';
+        const list = state[curr] || [];
         list.forEach(p => {
-            const div = document.createElement('div'); div.className = 'photo-card';
-            div.innerHTML = '<img src="'+p.url+'"><div>'+p.user+'</div><div class="btn-group">' +
+            const div = document.createElement('div'); div.className = 'p-card';
+            div.innerHTML = '<img src="'+p.url+'"><div>'+p.user+'</div><div class="btns">' +
                 '<button style="background:#28a745" onclick=\\'act("approve",'+JSON.stringify(p)+')\\'>OUI</button>' +
-                '<button style="background:#ffc107" onclick=\\'act("reject",'+JSON.stringify(p)+')\\'>NON</button>' +
-                '<button style="background:#333" onclick=\\'act("trash",'+JSON.stringify(p)+')\\'>🗑️</button></div>';
-            c.appendChild(div);
+                '<button style="background:#ffc107; color:black" onclick=\\'act("reject",'+JSON.stringify(p)+')\\'>NON</button>' +
+                '<button style="background:#343a40" onclick=\\'act("trash",'+JSON.stringify(p)+')\\'>🗑️</button></div>';
+            g.appendChild(div);
         });
     }
     </script></body></html>`);
 });
 
-// 3. PAGE RETRO (Plein écran corrigé)
+// PAGE RÉTRO (Plein écran corrigé)
 app.get('/retro', (req, res) => {
     res.send(`<!DOCTYPE html><html><body style="background:black; margin:0; overflow:hidden;">
-    <div id="overlay" style="position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.8); color:white; font-family:sans-serif;">
-        <button onclick="start()" style="padding:20px 40px; font-size:20px; cursor:pointer; border-radius:50px; border:none; background:#28a745; color:white;">Lancer le Plein Écran</button>
+    <div id="start" style="position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.9); z-index:100;">
+        <button onclick="go()" style="padding:20px 40px; font-size:20px; background:#28a745; color:white; border:none; border-radius:50px; cursor:pointer;">LANCER LE PLEIN ÉCRAN</button>
     </div>
-    <div id="slide" style="width:100vw; height:100vh; display:flex; align-items:center; justify-content:center;">
-        <img id="img" style="max-width:100%; max-height:100%; transition: opacity 1s; opacity:0;">
-    </div>
+    <img id="img" style="width:100vw; height:100vh; object-fit:contain; transition:opacity 1s; opacity:0;">
     <script src="/socket.io/socket.io.js"></script>
     <script>
-    const socket = io();
-    let photos = [], cur = 0;
-    
-    function start() {
-        document.getElementById('overlay').style.display = 'none';
-        const el = document.documentElement;
-        if (el.requestFullscreen) el.requestFullscreen();
-        setInterval(next, 3000);
+    const socket = io(); let photos = [], cur = 0;
+    function go() { 
+        document.getElementById('start').style.display='none'; 
+        document.documentElement.requestFullscreen();
+        setInterval(next, 3000); 
     }
-    
     function next() {
         if(!photos.length) return;
-        const img = document.getElementById('img');
-        img.style.opacity = 0;
-        setTimeout(() => {
-            img.src = photos[cur].url;
-            img.style.opacity = 1;
-            cur = (cur + 1) % photos.length;
-        }, 1000);
+        const i = document.getElementById('img');
+        i.style.opacity = 0;
+        setTimeout(() => { i.src = photos[cur].url; i.style.opacity = 1; cur = (cur+1)%photos.length; }, 1000);
     }
     socket.on('init_photos', d => { photos = d.photos; });
     </script></body></html>`);
 });
 
-server.listen(PORT, () => console.log('Prêt : port ' + PORT));
+server.listen(PORT, () => console.log('Lien : http://localhost:' + PORT));
